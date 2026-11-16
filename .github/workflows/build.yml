@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
@@ -10,6 +10,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Localizar o projeto
+        id: proj
+        run: |
+          achar() { find . -name package.json -not -path './.git/*' -not -path '*/node_modules/*' | head -n 1; }
+          P=$(achar)
+          if [ -z "$P" ]; then
+            Z=$(find . -maxdepth 2 -name '*.zip' -not -path './.git/*' | head -n 1)
+            if [ -n "$Z" ]; then
+              echo "Extraindo $Z"
+              unzip -o "$Z" -d projeto-extraido
+              P=$(achar)
+            fi
+          fi
+          if [ -z "$P" ]; then
+            echo "::error::package.json não encontrado. Envie os arquivos de dentro do projeto.zip (package.json, capacitor.config.json e a pasta www)."
+            echo "Arquivos no repositório:"
+            find . -path ./.git -prune -o -type f -print | head -40
+            exit 1
+          fi
+          echo "Projeto em: $(dirname "$P")"
+          echo "dir=$(dirname "$P")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
@@ -21,15 +43,17 @@ jobs:
           java-version: 17
 
       - name: Instalar dependências
+        working-directory: ${{ steps.proj.outputs.dir }}
         run: npm install
 
       - name: Criar projeto Android
+        working-directory: ${{ steps.proj.outputs.dir }}
         run: |
           npx cap add android
           npx cap sync android
 
       - name: Compilar APK
-        working-directory: android
+        working-directory: ${{ steps.proj.outputs.dir }}/android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug
@@ -37,4 +61,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: radar-roblox-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.proj.outputs.dir }}/android/app/build/outputs/apk/debug/app-debug.apk
